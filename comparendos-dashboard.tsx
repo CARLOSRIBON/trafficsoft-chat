@@ -475,19 +475,19 @@ function HistoryItem({item,onClick,theme:t}) {
 }
 
 // ─── IFRAME postMessage HOOK ───
-const useParentMessage = (onUser: (id: string) => void) => {
+const useParentMessage = (onContext: (userId: string, city?: string) => void) => {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       // TODO: restringir origen cuando se proteja → if (e.origin !== 'https://validacion.trafficsoft.co') return;
       if (e.data?.type === 'set-user' && typeof e.data.userId === 'string') {
-        onUser(e.data.userId);
+        onContext(e.data.userId, typeof e.data.city === 'string' ? e.data.city : undefined);
       }
     };
     window.addEventListener('message', handler);
     // Notificar al padre que el chat está listo
     window.parent?.postMessage({ type: 'chat-ready' }, '*');
     return () => window.removeEventListener('message', handler);
-  }, [onUser]);
+  }, [onContext]);
 };
 
 // ─── MAIN APP ───
@@ -498,10 +498,11 @@ export default function App() {
   const [loading,setLoading]=useState(false);
   const [apiUrl,setApiUrl]=useState(DEFAULT_API);
   const [userId,setUserId]=useState("anonymous");
+  const [city,setCity]=useState<string|undefined>(undefined);
 
-  // Escuchar postMessage del iframe padre para recibir el userId
-  const handleParentUser = useCallback((id: string) => setUserId(id), []);
-  useParentMessage(handleParentUser);
+  // Escuchar postMessage del iframe padre para recibir userId y city
+  const handleParentContext = useCallback((id: string, c?: string) => { setUserId(id); if (c) setCity(c); }, []);
+  useParentMessage(handleParentContext);
   const [showSettings,setShowSettings]=useState(false);
   const [showHistory,setShowHistory]=useState(false);
   const [history,setHistory]=useState([]);
@@ -559,7 +560,7 @@ export default function App() {
   const sendMessage = useCallback(async()=>{
     const q=input.trim();
     if(!q||loading) return;
-    setInput("");setError(null);
+    setInput("");setError(null);document.querySelector<HTMLTextAreaElement>('textarea')?.style.setProperty('height','auto');
     setMessages(prev=>[...prev,{role:"user",text:q}]);
     setLoading(true);
     try {
@@ -578,7 +579,7 @@ export default function App() {
     } finally { setLoading(false) }
   },[input,loading,api]);
 
-  const handleKey = e => {if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage()}};
+  const handleKey = e => {if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage()}};  // Shift+Enter = nueva línea
 
   const quickAsk = q => { setInput(q); setTimeout(()=>{setInput(prev=>{if(prev===q){/* trigger */} return prev})},50) };
 
@@ -754,10 +755,10 @@ export default function App() {
       {/* ─── INPUT ─── */}
       <div style={{borderTop:`1px solid ${t.bgSecondary}`,padding:"14px 20px",flexShrink:0}}>
         <div style={{maxWidth:760,margin:"0 auto",display:"flex",gap:10,alignItems:"flex-end"}}>
-          <div style={{flex:1,background:t.inputBg,border:`1px solid ${t.border}`,borderRadius:14,padding:"4px 4px 4px 16px",display:"flex",alignItems:"center",gap:8}}>
-            <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={handleKey}
-              placeholder="Haz una pregunta sobre tránsito..." disabled={loading}
-              style={{flex:1,background:"transparent",border:"none",outline:"none",color:t.text,fontSize:14,padding:"10px 0"}}/>
+          <div style={{flex:1,background:t.inputBg,border:`1px solid ${t.border}`,borderRadius:14,padding:"4px 4px 4px 16px",display:"flex",alignItems:"flex-end",gap:8}}>
+            <textarea value={input} onChange={e=>{setInput(e.target.value);e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,150)+"px"}} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleKey(e as any)}}}
+              placeholder="Haz una pregunta sobre tránsito..." disabled={loading} rows={1}
+              style={{flex:1,background:"transparent",border:"none",outline:"none",color:t.text,fontSize:14,padding:"10px 0",resize:"none",maxHeight:150,lineHeight:"1.4",fontFamily:"inherit"}}/>
             <button onClick={sendMessage} disabled={loading||!input.trim()} style={{
               width:36,height:36,borderRadius:10,border:"none",
               cursor:loading||!input.trim()?"default":"pointer",

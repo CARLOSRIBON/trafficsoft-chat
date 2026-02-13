@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ejemplo: Transit AI Chat Widget</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, system-ui, sans-serif; background: #f5f5f5; padding: 40px; }
+    h1 { font-size: 20px; margin-bottom: 8px; color: #171717; }
+    p { font-size: 14px; color: #404040; margin-bottom: 20px; max-width: 600px; }
+
+    /* ─── Widget flotante ─── */
+    #chat-widget-btn {
+      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      width: 56px; height: 56px; border-radius: 50%; border: none;
+      background: #3b82f6; color: #fff; cursor: pointer;
+      box-shadow: 0 4px 16px rgba(59,130,246,0.4);
+      display: flex; align-items: center; justify-content: center;
+      transition: transform 0.2s, box-shadow 0.2s;
+      font-size: 24px;
+    }
+    #chat-widget-btn:hover {
+      transform: scale(1.08);
+      box-shadow: 0 6px 24px rgba(59,130,246,0.5);
+    }
+
+    #chat-widget-panel {
+      position: fixed; bottom: 92px; right: 24px; z-index: 9998;
+      width: 400px; height: 600px;
+      border-radius: 16px; overflow: hidden;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+      opacity: 0; transform: translateY(20px) scale(0.95);
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    #chat-widget-panel.open {
+      opacity: 1; transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    #chat-widget-panel iframe {
+      width: 100%; height: 100%; border: none;
+    }
+
+    /* ─── Responsive: en mobile ocupa toda la pantalla ─── */
+    @media (max-width: 480px) {
+      #chat-widget-panel {
+        width: 100%; height: 100%;
+        bottom: 0; right: 0;
+        border-radius: 0;
+      }
+      #chat-widget-panel.open ~ #chat-widget-btn {
+        display: none;
+      }
+    }
+
+    /* ─── Code snippet ─── */
+    pre {
+      background: #1a1a1a; color: #7dd3fc;
+      padding: 16px; border-radius: 8px;
+      margin-top: 20px; font-size: 12px;
+      overflow-x: auto; line-height: 1.6;
+      max-width: 700px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Transit AI Chat - Widget Flotante</h1>
+  <p>Haz clic en el boton azul de la esquina inferior derecha para abrir el chat. El widget se comunica con la pagina padre via <code>postMessage</code>.</p>
+
+  <!-- Widget: boton flotante -->
+  <button id="chat-widget-btn" onclick="toggleChat()" aria-label="Abrir chat">
+    <span id="btn-icon">💬</span>
+  </button>
+
+  <!-- Widget: panel del chat (lazy-load: el iframe se crea al abrir) -->
+  <div id="chat-widget-panel"></div>
+
+  <pre><code>&lt;!-- 1. Copiar este snippet antes de &lt;/body&gt; --&gt;
+
+&lt;!-- Boton flotante --&gt;
+&lt;button id="chat-widget-btn" onclick="toggleChat()"
+  style="position:fixed;bottom:24px;right:24px;z-index:9999;
+  width:56px;height:56px;border-radius:50%;border:none;
+  background:#3b82f6;color:#fff;cursor:pointer;font-size:24px;
+  box-shadow:0 4px 16px rgba(59,130,246,0.4)"&gt;💬&lt;/button&gt;
+
+&lt;!-- Panel del chat --&gt;
+&lt;div id="chat-widget-panel"
+  style="position:fixed;bottom:92px;right:24px;z-index:9998;
+  width:400px;height:600px;border-radius:16px;overflow:hidden;
+  box-shadow:0 8px 40px rgba(0,0,0,0.2);display:none"&gt;
+  &lt;iframe id="transit-chat"
+    src="https://validacion.trafficsoft.co/chat/"
+    style="width:100%;height:100%;border:none"
+    allow="clipboard-write"&gt;&lt;/iframe&gt;
+&lt;/div&gt;
+
+&lt;script&gt;
+  var chatOpen = false;
+  function toggleChat() {
+    chatOpen = !chatOpen;
+    var panel = document.getElementById('chat-widget-panel');
+    panel.style.display = chatOpen ? 'block' : 'none';
+  }
+
+  // Enviar contexto cuando el chat este listo
+  window.addEventListener('message', function(e) {
+    if (e.data &amp;&amp; e.data.type === 'chat-ready') {
+      document.getElementById('transit-chat')
+        .contentWindow.postMessage({
+          type: 'set-user',
+          userId: 'nombre.usuario',  // Reemplazar
+          city: 'bogota'             // Opcional
+        }, 'https://validacion.trafficsoft.co');
+    }
+  });
+&lt;/script&gt;</code></pre>
+
+  <script>
+    var chatOpen = false;
+    var chatLoaded = false;
+
+    function toggleChat() {
+      chatOpen = !chatOpen;
+      var panel = document.getElementById('chat-widget-panel');
+      var icon = document.getElementById('btn-icon');
+
+      if (chatOpen) {
+        // Lazy-load: crear el iframe solo la primera vez
+        if (!chatLoaded) {
+          panel.innerHTML = '<iframe id="transit-chat" src="https://validacion.trafficsoft.co/chat/" allow="clipboard-write"></iframe>';
+          chatLoaded = true;
+        }
+        panel.classList.add('open');
+        icon.textContent = '✕';
+      } else {
+        panel.classList.remove('open');
+        icon.textContent = '💬';
+      }
+    }
+
+    // Enviar contexto cuando el chat este listo
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'chat-ready') {
+        var iframe = document.getElementById('transit-chat');
+        if (iframe) {
+          iframe.contentWindow.postMessage({
+            type: 'set-user',
+            userId: 'carlos.ribon',
+            city: 'valledupar'
+          }, '*'); // En produccion usar: 'https://validacion.trafficsoft.co'
+        }
+      }
+    });
+  </script>
+
+</body>
+</html>
