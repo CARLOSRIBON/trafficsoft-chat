@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transit-chat
+  namespace: transit-chat
+  labels:
+    app: transit-chat
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: transit-chat
+  template:
+    metadata:
+      labels:
+        app: transit-chat
+    spec:
+      nodeSelector:
+        layer: frontend
+      containers:
+        - name: transit-chat
+          image: bog.ocir.io/ax5xenainknp/transit-chat:v1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /chat/health
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /chat/health
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            readOnlyRootFilesystem: false
+            runAsNonRoot: false
+      terminationGracePeriodSeconds: 10

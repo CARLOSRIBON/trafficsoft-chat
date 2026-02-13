@@ -8,7 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 // ─── CONFIG ───
-const DEFAULT_API = "/api";  // Proxy configured in vite.config.ts → http://127.0.0.1:8080
+const DEFAULT_API = import.meta.env.VITE_API_URL || "/chat/api";
 const COLORS_10 = ["#ef4444","#f97316","#f59e0b","#22c55e","#14b8a6","#3b82f6","#8b5cf6","#ec4899","#06b6d4","#84cc16"];
 
 // ─── THEME SYSTEM ───
@@ -112,6 +112,24 @@ const numFmt = n => Number(n).toLocaleString("es-CO");
 const shortK = n => { const v=Number(n); return v>=1e6?`${(v/1e6).toFixed(1)}M`:v>=1000?`${(v/1000).toFixed(v>=10000?0:1)}k`:String(v) };
 const truncate = (s,m=45) => s&&s.length>m ? s.slice(0,m)+"…" : s;
 const isDateStr = v => typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v);
+
+// ─── DOWNLOAD UTILS ───
+const downloadXlsx = async (data: any[], filename = 'datos') => {
+  const XLSX = await import('xlsx');
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+  XLSX.writeFile(wb, `${filename}.xlsx`);
+};
+
+const downloadAsPng = async (element: HTMLElement, filename = 'grafico', bgColor = '#1a1a1a') => {
+  const { default: html2canvas } = await import('html2canvas');
+  const canvas = await html2canvas(element, { backgroundColor: bgColor, scale: 2 });
+  const link = document.createElement('a');
+  link.download = `${filename}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+};
 
 // ─── MARKDOWN COMPONENTS (theme-aware) ───
 const createMdComponents = (t: typeof themes.dark) => ({
@@ -316,17 +334,21 @@ function RenderComparison({data,config,theme:t}) {
 
 // ─── CHART DISPATCHER ───
 function ChartRenderer({renderCfg,data,theme:t}) {
+  const chartRef = useRef<HTMLDivElement>(null);
   if(!renderCfg) return null;
   const {type,config}=renderCfg;
-  // Some types don't need data
-  if(type==="text_only") return null;
+  if(type==="text_only" || type==="table") return null;
   if(!data?.length && type!=="metric_card") return null;
+
+  const isVisualChart = ["line_chart","bar_chart","grouped_bar_chart","stacked_bar_chart","pie_chart","comparison","metric_card"].includes(type);
+  const dlBtnStyle = {background:"none",border:`1px solid ${t.border}`,borderRadius:6,padding:"4px 10px",fontSize:11,color:t.textMuted,cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"all 0.15s"};
+  const safeName = (config.title||type).replace(/[^a-zA-Z0-9áéíóúñ ]/g,"").trim().replace(/\s+/g,"_").slice(0,40);
 
   const C = {
     line_chart:RenderLineChart,
     bar_chart:RenderBarChart,
     grouped_bar_chart:RenderGroupedBarChart,
-    stacked_bar_chart:RenderGroupedBarChart, // Reuse with stacking
+    stacked_bar_chart:RenderGroupedBarChart,
     pie_chart:RenderPieChart,
     metric_card:RenderMetricCard,
     table:RenderTable,
@@ -336,8 +358,21 @@ function ChartRenderer({renderCfg,data,theme:t}) {
 
   return (
     <div style={{background:t.cardBg,border:`1px solid ${t.border}`,borderRadius:12,padding:"20px 12px 8px"}}>
-      {config.title && <div style={{fontSize:11,color:t.textMuted,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",padding:"0 4px 10px"}}>{config.title}</div>}
-      {C ? <C data={data} config={config} theme={t}/> : <div style={{color:t.textDim,fontSize:13,padding:20}}>Chart type "{type}" no soportado aún.</div>}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 4px 10px"}}>
+        {config.title ? <div style={{fontSize:11,color:t.textMuted,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase"}}>{config.title}</div> : <div/>}
+        <div style={{display:"flex",gap:6}}>
+          {isVisualChart && (
+            <button onClick={()=>chartRef.current && downloadAsPng(chartRef.current,safeName,t.cardBg)} style={dlBtnStyle}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=t.borderHover;e.currentTarget.style.color=t.text}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.textMuted}}>
+              ↓ .png
+            </button>
+          )}
+        </div>
+      </div>
+      <div ref={chartRef}>
+        {C ? <C data={data} config={config} theme={t}/> : <div style={{color:t.textDim,fontSize:13,padding:20}}>Chart type "{type}" no soportado aún.</div>}
+      </div>
     </div>
   );
 }
@@ -350,10 +385,17 @@ function DataTable({data,theme:t}) {
   const btnStyle = {background:"none",border:`1px solid ${t.border}`,borderRadius:8,padding:"7px 14px",fontSize:12,color:t.textMuted,cursor:"pointer",display:"flex",alignItems:"center",gap:6};
   return (
     <div style={{marginTop:10}}>
-      <button onClick={()=>setShow(!show)} style={btnStyle}>
-        <span style={{fontSize:10,transform:show?"rotate(90deg)":"rotate(0)",display:"inline-block",transition:"transform 0.15s"}}>▶</span>
-        📋 Datos ({data.length} registros)
-      </button>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <button onClick={()=>setShow(!show)} style={btnStyle}>
+          <span style={{fontSize:10,transform:show?"rotate(90deg)":"rotate(0)",display:"inline-block",transition:"transform 0.15s"}}>▶</span>
+          📋 Datos ({data.length} registros)
+        </button>
+        <button onClick={()=>downloadXlsx(data,`datos_${data.length}_registros`)} style={btnStyle}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor=t.borderHover;e.currentTarget.style.color=t.text}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.textMuted}}>
+          ↓ .xlsx
+        </button>
+      </div>
       {show&&(
         <div style={{background:t.cardBg,border:`1px solid ${t.border}`,borderRadius:12,overflow:"auto",marginTop:6,maxHeight:360}}>
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:400}}>
@@ -432,6 +474,22 @@ function HistoryItem({item,onClick,theme:t}) {
   );
 }
 
+// ─── IFRAME postMessage HOOK ───
+const useParentMessage = (onUser: (id: string) => void) => {
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      // TODO: restringir origen cuando se proteja → if (e.origin !== 'https://validacion.trafficsoft.co') return;
+      if (e.data?.type === 'set-user' && typeof e.data.userId === 'string') {
+        onUser(e.data.userId);
+      }
+    };
+    window.addEventListener('message', handler);
+    // Notificar al padre que el chat está listo
+    window.parent?.postMessage({ type: 'chat-ready' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, [onUser]);
+};
+
 // ─── MAIN APP ───
 export default function App() {
   const t = useSystemTheme();
@@ -439,7 +497,11 @@ export default function App() {
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const [apiUrl,setApiUrl]=useState(DEFAULT_API);
-  const [userId,setUserId]=useState("carlos-test");
+  const [userId,setUserId]=useState("anonymous");
+
+  // Escuchar postMessage del iframe padre para recibir el userId
+  const handleParentUser = useCallback((id: string) => setUserId(id), []);
+  useParentMessage(handleParentUser);
   const [showSettings,setShowSettings]=useState(false);
   const [showHistory,setShowHistory]=useState(false);
   const [history,setHistory]=useState([]);

@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+.git.nosync
+.claude
+.DS_Store
+iframe-example.html
+k8s

@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: transit-chat-ingress
+  namespace: transit-chat
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx-public
+  tls:
+    - hosts:
+        - validacion.trafficsoft.co
+      secretName: trafficsoft-tls
+  rules:
+    - host: validacion.trafficsoft.co
+      http:
+        paths:
+          - path: /chat
+            pathType: Prefix
+            backend:
+              service:
+                name: transit-chat
+                port:
+                  number: 80
