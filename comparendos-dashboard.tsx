@@ -315,6 +315,180 @@ function RenderTable({data,config,theme:t}) {
   );
 }
 
+// ─── HEATMAP (grid de color por intensidad) ───
+function RenderHeatmap({data,config,theme:t}) {
+  if(!data?.length) return null;
+  const catKey = config.category_key;
+  const serKey = config.series_key;
+  const valKey = config.data_key;
+
+  // Extraer ejes únicos
+  const rows = [...new Set(data.map(d=>String(d[catKey])))];
+  const cols = [...new Set(data.map(d=>String(d[serKey])))].sort((a,b)=>String(a).localeCompare(String(b)));
+
+  // Crear lookup rápido
+  const lookup = new Map<string,number>();
+  let minVal=Infinity, maxVal=-Infinity;
+  data.forEach(d=>{
+    const v=Number(d[valKey])||0;
+    lookup.set(`${d[catKey]}__${d[serKey]}`,v);
+    if(v<minVal) minVal=v;
+    if(v>maxVal) maxVal=v;
+  });
+  const range=maxVal-minVal||1;
+
+  // Color interpolation (bajo → alto): gris oscuro → accent
+  const baseColor = config.color || t.accent;
+  const [br,bg,bb] = hexToRgb(baseColor.startsWith('#')?baseColor:'#3b82f6');
+  const cellColor = (v:number) => {
+    const ratio = (v-minVal)/range;
+    // Mezclar fondo oscuro con color base según ratio
+    const r=Math.round(40+(br-40)*ratio);
+    const g=Math.round(40+(bg-40)*ratio);
+    const b=Math.round(40+(bb-40)*ratio);
+    return `rgb(${r},${g},${b})`;
+  };
+
+  const cellSize = Math.max(32, Math.min(56, 600/cols.length));
+
+  return (
+    <div style={{overflow:"auto",maxHeight:500}}>
+      <table style={{borderCollapse:"separate",borderSpacing:2}}>
+        <thead>
+          <tr>
+            <th style={{padding:"4px 8px",fontSize:10,color:t.textMuted,fontWeight:600,textAlign:"left",position:"sticky",left:0,background:t.cardBg,zIndex:1}}/>
+            {cols.map(c=>(
+              <th key={c} style={{padding:"4px 6px",fontSize:9,color:t.textMuted,fontWeight:600,textAlign:"center",whiteSpace:"nowrap",maxWidth:cellSize}}>
+                {isDateStr(c)?fmt(c):truncate(String(c),8)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(row=>(
+            <tr key={row}>
+              <td style={{padding:"4px 8px",fontSize:10,color:t.textSecondary,fontWeight:600,whiteSpace:"nowrap",position:"sticky",left:0,background:t.cardBg,zIndex:1}}>
+                {truncate(String(row),20)}
+              </td>
+              {cols.map(col=>{
+                const v=lookup.get(`${row}__${col}`);
+                const hasValue = v!=null && v!==0;
+                return (
+                  <td key={col} title={`${row} · ${col}: ${v!=null?numFmt(v):'-'}`} style={{
+                    width:cellSize,height:cellSize,minWidth:cellSize,
+                    background:hasValue?cellColor(v!):`${t.border}40`,
+                    borderRadius:4,textAlign:"center",fontSize:10,fontWeight:700,
+                    color:hasValue?(((v!-minVal)/range)>0.4?'#fff':'rgba(255,255,255,0.6)'):'transparent',
+                    cursor:"default",transition:"opacity 0.15s",
+                  }}>
+                    {hasValue?shortK(v!):''}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {/* Leyenda de escala */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,paddingLeft:8}}>
+        <span style={{fontSize:10,color:t.textMuted}}>{shortK(minVal)}</span>
+        <div style={{flex:1,maxWidth:200,height:8,borderRadius:4,background:`linear-gradient(90deg, rgb(40,40,40), ${baseColor})`}}/>
+        <span style={{fontSize:10,color:t.textMuted}}>{shortK(maxVal)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── HISTOGRAM (distribución de frecuencias) ───
+function RenderHistogram({data,config,theme:t}) {
+  if(!data?.length) return null;
+  const sorted = [...data].sort((a,b)=>{
+    const aKey=String(a[config.category_key]), bKey=String(b[config.category_key]);
+    // Intentar orden numérico para rangos/bins
+    const aNum=parseFloat(aKey), bNum=parseFloat(bKey);
+    if(!isNaN(aNum)&&!isNaN(bNum)) return aNum-bNum;
+    return aKey.localeCompare(bKey);
+  });
+  const barColor = config.color || t.accent;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={sorted} margin={{top:8,right:8,left:-10,bottom:0}} barCategoryGap={0} barGap={0}>
+        <CartesianGrid strokeDasharray="3 3" stroke={t.gridStroke} vertical={false}/>
+        <XAxis dataKey={config.category_key} stroke={t.chartStroke} tick={{fill:t.textDim,fontSize:10}} tickFormatter={v=>truncate(String(v),12)}/>
+        <YAxis stroke={t.chartStroke} tick={{fill:t.textMuted,fontSize:11}} tickFormatter={shortK}/>
+        <Tooltip content={<GenericTooltip theme={t}/>} cursor={{fill:"rgba(255,255,255,0.02)"}}/>
+        <Bar dataKey={config.data_key} fill={barColor} radius={[2,2,0,0]} stroke={t.cardBg} strokeWidth={1}/>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── GAUSSIAN / DISTRIBUCIÓN (campana de Gauss) ───
+function RenderGaussian({data,config,theme:t}) {
+  if(!data?.length) return null;
+  const valKey = config.data_key;
+  const catKey = config.category_key;
+
+  // Detectar si viene pre-computado (con category_key + data_key) o valores crudos
+  const hasBins = data.every(d => d[catKey]!=null && d[valKey]!=null);
+
+  let chartData: {x:string, freq:number, gauss:number}[];
+
+  if(hasBins) {
+    // El backend ya mandó los bins: [{rango: "0-100", frecuencia: 45}, ...]
+    const values = data.map(d=>Number(d[valKey]));
+    const maxFreq = Math.max(...values);
+    // Superponer curva gaussiana normalizada al máximo
+    chartData = data.map((d,i)=>{
+      const freq = Number(d[valKey]);
+      const xNorm = (i - data.length/2) / (data.length/4); // normalizar posición
+      const gauss = maxFreq * Math.exp(-0.5*xNorm**2);
+      return { x: String(d[catKey]), freq, gauss: Math.round(gauss*100)/100 };
+    });
+  } else {
+    // Valores crudos: computar bins manualmente
+    const rawValues = data.map(d=>Number(d[valKey])||0).sort((a,b)=>a-b);
+    const min=rawValues[0], max=rawValues[rawValues.length-1];
+    const binCount = Math.min(20, Math.max(8, Math.ceil(Math.sqrt(rawValues.length))));
+    const binWidth = (max-min)/binCount || 1;
+    const mean = rawValues.reduce((s,v)=>s+v,0)/rawValues.length;
+    const std = Math.sqrt(rawValues.reduce((s,v)=>s+(v-mean)**2,0)/rawValues.length)||1;
+
+    const bins = Array.from({length:binCount},(_,i)=>{
+      const lo=min+i*binWidth, hi=lo+binWidth;
+      const count = rawValues.filter(v=>v>=lo&&(i===binCount-1?v<=hi:v<hi)).length;
+      const midpoint = (lo+hi)/2;
+      // Curva gaussiana escalada
+      const gauss = (rawValues.length*binWidth/(std*Math.sqrt(2*Math.PI))) * Math.exp(-0.5*((midpoint-mean)/std)**2);
+      return { x: `${shortK(lo)}-${shortK(hi)}`, freq: count, gauss: Math.round(gauss*100)/100 };
+    });
+    chartData = bins;
+  }
+
+  const color = config.color || t.accent;
+  const [cr,cg,cb] = hexToRgb(color.startsWith('#')?color:'#3b82f6');
+  const gaussColor = `rgb(${Math.min(255,cr+80)},${Math.min(255,cg+40)},${Math.min(255,cb+40)})`;
+
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <ComposedChart data={chartData} margin={{top:8,right:8,left:-10,bottom:0}} barCategoryGap={0} barGap={0}>
+        <defs>
+          <linearGradient id="gaussGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={gaussColor} stopOpacity={0.3}/>
+            <stop offset="100%" stopColor={gaussColor} stopOpacity={0}/>
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke={t.gridStroke} vertical={false}/>
+        <XAxis dataKey="x" stroke={t.chartStroke} tick={{fill:t.textDim,fontSize:9}} interval={Math.max(0,Math.floor(chartData.length/10)-1)}/>
+        <YAxis stroke={t.chartStroke} tick={{fill:t.textMuted,fontSize:11}} tickFormatter={shortK}/>
+        <Tooltip content={<GenericTooltip theme={t}/>} cursor={{fill:"rgba(255,255,255,0.02)"}}/>
+        <Bar dataKey="freq" name="Frecuencia" fill={color} radius={[2,2,0,0]} stroke={t.cardBg} strokeWidth={1} opacity={0.85}/>
+        <Area type="monotone" dataKey="gauss" name="Distribución" stroke={gaussColor} strokeWidth={2.5} fill="url(#gaussGrad)" dot={false}/>
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
 // ─── COMPARISON (two metrics side by side) ───
 function RenderComparison({data,config,theme:t}) {
   if(!data?.length) return null;
@@ -340,7 +514,7 @@ function ChartRenderer({renderCfg,data,theme:t}) {
   if(type==="text_only" || type==="table") return null;
   if(!data?.length && type!=="metric_card") return null;
 
-  const isVisualChart = ["line_chart","bar_chart","grouped_bar_chart","stacked_bar_chart","pie_chart","comparison","metric_card"].includes(type);
+  const isVisualChart = ["line_chart","bar_chart","grouped_bar_chart","stacked_bar_chart","pie_chart","comparison","metric_card","heatmap","histogram","gaussian"].includes(type);
   const dlBtnStyle = {background:"none",border:`1px solid ${t.border}`,borderRadius:6,padding:"4px 10px",fontSize:11,color:t.textMuted,cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"all 0.15s"};
   const safeName = (config.title||type).replace(/[^a-zA-Z0-9áéíóúñ ]/g,"").trim().replace(/\s+/g,"_").slice(0,40);
 
@@ -354,6 +528,9 @@ function ChartRenderer({renderCfg,data,theme:t}) {
     table:RenderTable,
     comparison:RenderComparison,
     text_only:RenderTextOnly,
+    heatmap:RenderHeatmap,
+    histogram:RenderHistogram,
+    gaussian:RenderGaussian,
   }[type];
 
   return (
@@ -589,7 +766,7 @@ export default function App() {
   const headerBtnStyle = {background:t.bgSecondary,border:`1px solid ${t.border}`,borderRadius:8,padding:"6px 12px",fontSize:12,color:t.textDim,cursor:"pointer"};
 
   return (
-    <div style={{minHeight:"100vh",background:t.bg,fontFamily:"'Inter',-apple-system,system-ui,sans-serif",color:t.text,display:"flex",flexDirection:"column"}}>
+    <div style={{height:"100vh",overflow:"hidden",background:t.bg,fontFamily:"'Inter',-apple-system,system-ui,sans-serif",color:t.text,display:"flex",flexDirection:"column"}}>
 
       {/* ─── HEADER ─── */}
       <div style={{borderBottom:`1px solid ${t.bgSecondary}`,padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
