@@ -113,6 +113,21 @@ const shortK = n => { const v=Number(n); return v>=1e6?`${(v/1e6).toFixed(1)}M`:
 const truncate = (s,m=45) => s&&s.length>m ? s.slice(0,m)+"…" : s;
 const isDateStr = v => typeof v==="string" && /^\d{4}-\d{2}-\d{2}/.test(v);
 
+// Luminancia relativa (WCAG) — devuelve 0..1
+const luminance = (hex: string): number => {
+  try {
+    const [r,g,b] = hexToRgb(hex.startsWith('#')?hex:'#000000');
+    const [rs,gs,bs] = [r,g,b].map(c => { const s=c/255; return s<=0.03928?s/12.92:((s+0.055)/1.055)**2.4; });
+    return 0.2126*rs + 0.7152*gs + 0.0722*bs;
+  } catch { return 0; }
+};
+// Si el color no tiene suficiente contraste contra el fondo oscuro, usar fallback
+const ensureContrast = (color: string|undefined, fallback: string, bgLum = 0.005): string => {
+  if(!color || !color.startsWith('#')) return fallback;
+  const ratio = (luminance(color)+0.05)/(bgLum+0.05);
+  return ratio < 2.5 ? fallback : color; // ratio mínimo ~2.5:1
+};
+
 // ─── DOWNLOAD UTILS ───
 const downloadXlsx = async (data: any[], filename = 'datos') => {
   const XLSX = await import('xlsx');
@@ -187,7 +202,12 @@ function RenderLineChart({data,config,theme:t}) {
 }
 
 function RenderBarChart({data,config,theme:t}) {
-  const sorted = [...data].sort((a,b)=>Number(b[config.data_key])-Number(a[config.data_key]));
+  // Si las categorías son numéricas o fechas, respetar orden natural; si no, ranking por valor
+  const cats = data.map(d=>d[config.category_key]);
+  const isOrdered = cats.every(c=>!isNaN(Number(c))) || cats.every(c=>isDateStr(String(c)));
+  const sorted = isOrdered
+    ? [...data].sort((a,b)=>{ const av=String(a[config.category_key]),bv=String(b[config.category_key]); return isDateStr(av)?av.localeCompare(bv):Number(av)-Number(bv); })
+    : [...data].sort((a,b)=>Number(b[config.data_key])-Number(a[config.data_key]));
   const isLong = sorted.some(d=>String(d[config.category_key]).length>20);
   const barColor = config.color || t.accent; // Un solo color para TODAS las barras
   if(isLong) {
@@ -514,6 +534,9 @@ function ChartRenderer({renderCfg,data,theme:t}) {
   if(type==="text_only" || type==="table") return null;
   if(!data?.length && type!=="metric_card") return null;
 
+  // Sanitizar color del backend: si no tiene contraste suficiente, usar accent del tema
+  const safeConfig = config.color ? {...config, color: ensureContrast(config.color, t.accent)} : config;
+
   const isVisualChart = ["line_chart","bar_chart","grouped_bar_chart","stacked_bar_chart","pie_chart","comparison","metric_card","heatmap","histogram","gaussian"].includes(type);
   const dlBtnStyle = {background:"none",border:`1px solid ${t.border}`,borderRadius:6,padding:"4px 10px",fontSize:11,color:t.textMuted,cursor:"pointer",display:"flex",alignItems:"center",gap:4,transition:"all 0.15s"};
   const safeName = (config.title||type).replace(/[^a-zA-Z0-9áéíóúñ ]/g,"").trim().replace(/\s+/g,"_").slice(0,40);
@@ -548,7 +571,7 @@ function ChartRenderer({renderCfg,data,theme:t}) {
         </div>
       </div>
       <div ref={chartRef}>
-        {C ? <C data={data} config={config} theme={t}/> : <div style={{color:t.textDim,fontSize:13,padding:20}}>Chart type "{type}" no soportado aún.</div>}
+        {C ? <C data={data} config={safeConfig} theme={t}/> : <div style={{color:t.textDim,fontSize:13,padding:20}}>Chart type "{type}" no soportado aún.</div>}
       </div>
     </div>
   );
