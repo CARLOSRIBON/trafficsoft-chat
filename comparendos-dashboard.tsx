@@ -11,53 +11,54 @@ import remarkGfm from "remark-gfm";
 const DEFAULT_API = import.meta.env.VITE_API_URL || "/chat/api";
 const COLORS_10 = ["#ef4444","#f97316","#f59e0b","#22c55e","#14b8a6","#3b82f6","#8b5cf6","#ec4899","#06b6d4","#84cc16"];
 
-// ─── THEME SYSTEM ───
+// ─── THEME SYSTEM (inspired by sidit-frontend) ───
+const FONT = "'DM Sans',system-ui,sans-serif";
 const themes = {
   dark: {
-    bg: "#0f0f0f",
-    bgSecondary: "#1a1a1a",
-    bgTertiary: "#141414",
-    border: "#262626",
-    borderHover: "#404040",
-    text: "#e5e5e5",
-    textSecondary: "#a3a3a3",
-    textMuted: "#525252",
-    textDim: "#666",
-    cardBg: "#1a1a1a",
-    inputBg: "#1a1a1a",
-    tooltipBg: "#1e1e1e",
-    gridStroke: "#222",
-    chartStroke: "#333",
-    codeBg: "#141414",
+    bg: "#09090b",
+    bgSecondary: "rgba(255,255,255,0.06)",
+    bgTertiary: "rgba(255,255,255,0.03)",
+    border: "rgba(255,255,255,0.10)",
+    borderHover: "rgba(255,255,255,0.20)",
+    text: "#fafafa",
+    textSecondary: "#a1a1aa",
+    textMuted: "#52525b",
+    textDim: "#71717a",
+    cardBg: "rgba(255,255,255,0.05)",
+    inputBg: "rgba(255,255,255,0.06)",
+    tooltipBg: "#18181b",
+    gridStroke: "#27272a",
+    chartStroke: "#3f3f46",
+    codeBg: "#18181b",
     codeText: "#7dd3fc",
-    userBubble: "#2563eb",
-    aiBubble: "linear-gradient(135deg,#3b82f6,#8b5cf6)",
+    userBubble: "#ECA411",
+    aiBubble: "linear-gradient(135deg,#ECA411,#f59e0b)",
     error: "#ef4444",
     success: "#22c55e",
-    accent: "#3b82f6",
+    accent: "#ECA411",
   },
   light: {
     bg: "#ffffff",
-    bgSecondary: "#f5f5f5",
+    bgSecondary: "rgba(0,0,0,0.04)",
     bgTertiary: "#fafafa",
-    border: "#e5e5e5",
-    borderHover: "#d4d4d4",
-    text: "#171717",
-    textSecondary: "#525252",
-    textMuted: "#a3a3a3",
-    textDim: "#737373",
-    cardBg: "#ffffff",
-    inputBg: "#f5f5f5",
+    border: "rgba(0,0,0,0.08)",
+    borderHover: "rgba(0,0,0,0.15)",
+    text: "#09090b",
+    textSecondary: "#52525b",
+    textMuted: "#a1a1aa",
+    textDim: "#71717a",
+    cardBg: "rgba(255,255,255,0.80)",
+    inputBg: "rgba(0,0,0,0.03)",
     tooltipBg: "#ffffff",
-    gridStroke: "#e5e5e5",
-    chartStroke: "#d4d4d4",
-    codeBg: "#f5f5f5",
-    codeText: "#0369a1",
-    userBubble: "#2563eb",
-    aiBubble: "linear-gradient(135deg,#3b82f6,#8b5cf6)",
+    gridStroke: "#e4e4e7",
+    chartStroke: "#d4d4d8",
+    codeBg: "#f4f4f5",
+    codeText: "#92400e",
+    userBubble: "#ECA411",
+    aiBubble: "linear-gradient(135deg,#ECA411,#f59e0b)",
     error: "#dc2626",
     success: "#16a34a",
-    accent: "#2563eb",
+    accent: "#ECA411",
   }
 };
 
@@ -674,21 +675,29 @@ function HistoryItem({item,onClick,theme:t}) {
   );
 }
 
+// ─── ALLOWED PARENT ORIGIN ───
+const ALLOWED_ORIGIN = 'https://validacion.trafficsoft.co';
+
 // ─── IFRAME postMessage HOOK ───
 const useParentMessage = (onContext: (userId: string, city?: string) => void) => {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      // TODO: restringir origen cuando se proteja → if (e.origin !== 'https://validacion.trafficsoft.co') return;
+      if (e.origin !== ALLOWED_ORIGIN) return;
       if (e.data?.type === 'set-user' && typeof e.data.userId === 'string') {
         onContext(e.data.userId, typeof e.data.city === 'string' ? e.data.city : undefined);
       }
     };
     window.addEventListener('message', handler);
-    // Notificar al padre que el chat está listo
-    window.parent?.postMessage({ type: 'chat-ready' }, '*');
+    window.parent?.postMessage({ type: 'chat-ready' }, ALLOWED_ORIGIN);
     return () => window.removeEventListener('message', handler);
   }, [onContext]);
 };
+
+// ─── IFRAME GUARD: bloquear acceso directo (fuera de iframe) ───
+const IS_EMBEDDED = (() => {
+  try { return window.self !== window.top; }
+  catch { return true; } // cross-origin → está en iframe, OK
+})();
 
 // ─── MAIN APP ───
 export default function App() {
@@ -703,6 +712,7 @@ export default function App() {
   // Escuchar postMessage del iframe padre para recibir userId y city
   const handleParentContext = useCallback((id: string, c?: string) => { setUserId(id); if (c) setCity(c); }, []);
   useParentMessage(handleParentContext);
+
   const [showSettings,setShowSettings]=useState(false);
   const [showHistory,setShowHistory]=useState(false);
   const [history,setHistory]=useState([]);
@@ -753,8 +763,18 @@ export default function App() {
     } catch {}
   },[api]);
 
+  // Top 5 most frequent user questions from history
+  const topQuestions = useMemo(()=>{
+    const freq: Record<string,number> = {};
+    history.forEach(h => {
+      const q = (h as any).question || (h as any).data?.question;
+      if (q) freq[q] = (freq[q]||0) + 1;
+    });
+    return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([q])=>q);
+  },[history]);
+
   // Boot
-  useEffect(()=>{checkHealth();loadSuggestions()},[]);
+  useEffect(()=>{checkHealth();loadSuggestions();loadHistory();},[]);
 
   // Ask
   const sendMessage = useCallback(async()=>{
@@ -786,21 +806,23 @@ export default function App() {
   // ─── Status dot ───
   const statusColor = health===true?t.success:health===false?t.error:t.textMuted;
   const statusText = health===true?"Conectado":health===false?"Desconectado":"Desconocido";
-  const headerBtnStyle = {background:t.bgSecondary,border:`1px solid ${t.border}`,borderRadius:8,padding:"6px 12px",fontSize:12,color:t.textDim,cursor:"pointer"};
+  const headerBtnStyle:React.CSSProperties = {background:t.cardBg,border:`1px solid ${t.border}`,borderRadius:10,padding:"6px 14px",fontSize:12,color:t.textDim,cursor:"pointer",fontFamily:FONT,fontWeight:500,backdropFilter:"blur(12px)",transition:"all 0.15s"};
+
+  if (!IS_EMBEDDED) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#0a0a0a",fontFamily:FONT,color:"#666",fontSize:14,textAlign:"center",padding:20}}>Acceso no autorizado.</div>;
 
   return (
-    <div style={{height:"100vh",overflow:"hidden",background:t.bg,fontFamily:"'Inter',-apple-system,system-ui,sans-serif",color:t.text,display:"flex",flexDirection:"column"}}>
+    <div style={{height:"100vh",overflow:"hidden",background:t.bg,fontFamily:FONT,color:t.text,display:"flex",flexDirection:"column"}}>
 
       {/* ─── HEADER ─── */}
-      <div style={{borderBottom:`1px solid ${t.bgSecondary}`,padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-        <div style={{width:30,height:30,borderRadius:8,background:t.aiBubble,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🚦</div>
+      <div style={{borderBottom:`1px solid ${t.border}`,padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexShrink:0,backdropFilter:"blur(20px)"}}>
+        <div style={{width:32,height:32,borderRadius:10,background:t.aiBubble,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:"0 2px 8px rgba(236,164,17,0.25)"}}>🚦</div>
         <div style={{flex:1}}>
-          <div style={{fontSize:14,fontWeight:700,color:t.text,display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:14,fontWeight:600,color:t.text,display:"flex",alignItems:"center",gap:8,letterSpacing:"-0.01em"}}>
             Transit AI
-            <div style={{width:7,height:7,borderRadius:"50%",background:statusColor,boxShadow:health===true?`0 0 6px ${statusColor}`:undefined}}/>
-            <span style={{fontSize:10,color:t.textMuted,fontWeight:400}}>{statusText}</span>
+            <div style={{width:7,height:7,borderRadius:"50%",background:statusColor,boxShadow:health===true?`0 0 8px ${statusColor}`:undefined}}/>
+            <span style={{fontSize:10,color:t.textMuted,fontWeight:500}}>{statusText}</span>
           </div>
-          <div style={{fontSize:11,color:t.textMuted}}>{apiUrl} · User: {userId}</div>
+          <div style={{fontSize:11,color:t.textMuted,fontWeight:400}}>User: {userId}</div>
         </div>
         <button onClick={()=>{loadHistory();setShowHistory(!showHistory)}} style={headerBtnStyle}>
           📜 Historial
@@ -856,64 +878,58 @@ export default function App() {
           {/* Empty state */}
           {messages.length===0&&(
             <div style={{textAlign:"center",padding:"60px 20px"}}>
-              <div style={{fontSize:44,marginBottom:16}}>🚦</div>
-              <h2 style={{fontSize:20,fontWeight:700,color:t.text,margin:"0 0 6px"}}>Transit AI Assistant</h2>
-              <p style={{color:t.textMuted,fontSize:14,margin:"0 0 28px"}}>
+              <div style={{width:48,height:48,borderRadius:16,background:t.accent,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:22,boxShadow:`0 4px 15px -3px rgba(236,164,17,0.4)`}}>🚦</div>
+              <h2 style={{fontSize:20,fontWeight:700,color:t.text,margin:"0 0 6px",letterSpacing:"-0.01em"}}>Transit AI Assistant</h2>
+              <p style={{color:t.textMuted,fontSize:13,margin:"0 0 32px",fontWeight:400}}>
                 Pregunta en lenguaje natural sobre comparendos, cámaras, rechazos, costos RUNT y más.
               </p>
 
               {health===false&&(
-                <div style={{background:`${t.error}12`,border:`1px solid ${t.error}30`,borderRadius:12,padding:"14px 18px",marginBottom:24,maxWidth:500,marginLeft:"auto",marginRight:"auto"}}>
-                  <div style={{fontSize:13,color:t.error,fontWeight:600,marginBottom:4}}>⚠️ API no disponible</div>
+                <div style={{background:`${t.error}12`,border:`1px solid ${t.error}30`,borderRadius:16,padding:"14px 18px",marginBottom:24,maxWidth:500,marginLeft:"auto",marginRight:"auto",backdropFilter:"blur(12px)"}}>
+                  <div style={{fontSize:13,color:t.error,fontWeight:600,marginBottom:4}}>API no disponible</div>
                   <div style={{fontSize:12,color:t.textSecondary,lineHeight:1.5}}>
-                    No se pudo conectar a <strong>{apiUrl}/health</strong>.<br/>
-                    Verifica que <code style={{color:t.codeText}}>kubectl port-forward</code> esté activo en puerto 8080.
+                    No se pudo conectar a <strong>{apiUrl}/health</strong>.
                   </div>
-                  <button onClick={checkHealth} style={{marginTop:10,background:t.border,border:"none",borderRadius:6,padding:"6px 14px",color:t.textSecondary,fontSize:12,cursor:"pointer"}}>🔄 Reintentar</button>
+                  <button onClick={checkHealth} style={{marginTop:10,background:t.border,border:"none",borderRadius:8,padding:"6px 14px",color:t.textSecondary,fontSize:12,cursor:"pointer",fontFamily:FONT,fontWeight:500}}>Reintentar</button>
                 </div>
               )}
 
-              {suggestions.length>0 ? (
-                // Group suggestions by category
-                <div style={{display:"flex",flexDirection:"column",gap:16,maxWidth:700,margin:"0 auto",textAlign:"left"}}>
-                  {Object.entries(suggestions.reduce((acc,s)=>{
-                    const cat = s.category || "General";
-                    if(!acc[cat]) acc[cat]=[];
-                    acc[cat].push(s);
-                    return acc;
-                  },{} as Record<string,any[]>)).map(([cat,items])=>(
-                    <div key={cat}>
-                      <div style={{fontSize:11,color:t.textMuted,fontWeight:600,marginBottom:8,textTransform:"uppercase",letterSpacing:0.5}}>{cat}</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                        {items.slice(0,4).map((q,i)=>(
-                          <button key={i} onClick={()=>setInput(q.text||q)} style={{
-                            background:t.bgSecondary,border:`1px solid ${t.border}`,borderRadius:8,padding:"8px 14px",
-                            color:t.textSecondary,fontSize:12,cursor:"pointer",transition:"all 0.15s",textAlign:"left",
-                          }}
-                            onMouseEnter={e=>{e.currentTarget.style.borderColor=t.borderHover;e.currentTarget.style.color=t.text}}
-                            onMouseLeave={e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.textSecondary}}>
-                            {q.text||q}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                // Fallback suggestions
-                <div style={{display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center"}}>
-                  {["Tendencia de comparendos esta semana","Top 10 causales de rechazo","Pendientes por tipo de vehículo","¿Cuál es la tendencia de costos en RUNT?"].map((q,i)=>(
-                    <button key={i} onClick={()=>setInput(q)} style={{
-                      background:t.bgSecondary,border:`1px solid ${t.border}`,borderRadius:10,padding:"10px 16px",
-                      color:t.textSecondary,fontSize:13,cursor:"pointer",transition:"all 0.15s",textAlign:"left",maxWidth:300,
-                    }}
-                      onMouseEnter={e=>{e.currentTarget.style.borderColor=t.borderHover;e.currentTarget.style.color=t.text}}
-                      onMouseLeave={e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.textSecondary}}>
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {/* Top 5 frequent questions or fallback suggestions */}
+              <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:480,margin:"0 auto"}}>
+                {topQuestions.length>0 ? (
+                  <>
+                    <div style={{fontSize:10,color:t.textMuted,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Tus preguntas frecuentes</div>
+                    {topQuestions.map((q,i)=>(
+                      <button key={i} onClick={()=>setInput(q)} style={{
+                        background:t.cardBg,border:`1px solid ${t.border}`,borderRadius:12,padding:"12px 16px",
+                        color:t.textSecondary,fontSize:13,cursor:"pointer",transition:"all 0.2s",textAlign:"left",
+                        fontFamily:FONT,fontWeight:400,backdropFilter:"blur(12px)",
+                        boxShadow:"0 1px 3px rgba(0,0,0,0.04)",
+                      }}
+                        onMouseEnter={e=>{e.currentTarget.style.borderColor=t.accent;e.currentTarget.style.color=t.text;e.currentTarget.style.boxShadow=`0 4px 12px rgba(236,164,17,0.12)`}}
+                        onMouseLeave={e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.textSecondary;e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.04)"}}>
+                        {q}
+                      </button>
+                    ))}
+                  </>
+                ) : suggestions.length>0 ? (
+                  <>
+                    <div style={{fontSize:10,color:t.textMuted,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>Sugerencias</div>
+                    {suggestions.slice(0,5).map((q,i)=>(
+                      <button key={i} onClick={()=>setInput(q.text||q)} style={{
+                        background:t.cardBg,border:`1px solid ${t.border}`,borderRadius:12,padding:"12px 16px",
+                        color:t.textSecondary,fontSize:13,cursor:"pointer",transition:"all 0.2s",textAlign:"left",
+                        fontFamily:FONT,fontWeight:400,backdropFilter:"blur(12px)",
+                        boxShadow:"0 1px 3px rgba(0,0,0,0.04)",
+                      }}
+                        onMouseEnter={e=>{e.currentTarget.style.borderColor=t.accent;e.currentTarget.style.color=t.text;e.currentTarget.style.boxShadow=`0 4px 12px rgba(236,164,17,0.12)`}}
+                        onMouseLeave={e=>{e.currentTarget.style.borderColor=t.border;e.currentTarget.style.color=t.textSecondary;e.currentTarget.style.boxShadow="0 1px 3px rgba(0,0,0,0.04)"}}>
+                        {q.text||q}
+                      </button>
+                    ))}
+                  </>
+                ) : null}
+              </div>
             </div>
           )}
 
@@ -922,7 +938,7 @@ export default function App() {
             <div key={i} style={{marginBottom:24}}>
               {msg.role==="user"&&(
                 <div style={{display:"flex",justifyContent:"flex-end"}}>
-                  <div style={{background:t.userBubble,borderRadius:"20px 20px 4px 20px",padding:"12px 18px",maxWidth:"80%",fontSize:15,color:"#fff",lineHeight:1.5}}>{msg.text}</div>
+                  <div style={{background:t.userBubble,borderRadius:"20px 20px 4px 20px",padding:"12px 18px",maxWidth:"80%",fontSize:14,color:"#fff",lineHeight:1.5,fontWeight:400,boxShadow:"0 2px 8px rgba(236,164,17,0.2)"}}>{msg.text}</div>
                 </div>
               )}
               {msg.role==="ai"&&<AIMessage msg={msg} theme={t}/>}
@@ -953,18 +969,19 @@ export default function App() {
       </div>
 
       {/* ─── INPUT ─── */}
-      <div style={{borderTop:`1px solid ${t.bgSecondary}`,padding:"14px 20px",flexShrink:0}}>
+      <div style={{borderTop:`1px solid ${t.border}`,padding:"14px 20px",flexShrink:0,backdropFilter:"blur(20px)"}}>
         <div style={{maxWidth:760,margin:"0 auto",display:"flex",gap:10,alignItems:"flex-end"}}>
-          <div style={{flex:1,background:t.inputBg,border:`1px solid ${t.border}`,borderRadius:14,padding:"4px 4px 4px 16px",display:"flex",alignItems:"flex-end",gap:8}}>
+          <div style={{flex:1,background:t.inputBg,border:`1px solid ${t.border}`,borderRadius:16,padding:"4px 4px 4px 16px",display:"flex",alignItems:"flex-end",gap:8,boxShadow:"0 1px 3px rgba(0,0,0,0.04)",transition:"border-color 0.2s"}}>
             <textarea value={input} onChange={e=>{setInput(e.target.value);e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,150)+"px"}} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleKey(e as any)}}}
               placeholder="Haz una pregunta sobre tránsito..." disabled={loading} rows={1}
-              style={{flex:1,background:"transparent",border:"none",outline:"none",color:t.text,fontSize:14,padding:"10px 0",resize:"none",maxHeight:150,lineHeight:"1.4",fontFamily:"inherit"}}/>
+              style={{flex:1,background:"transparent",border:"none",outline:"none",color:t.text,fontSize:14,padding:"10px 0",resize:"none",maxHeight:150,lineHeight:"1.5",fontFamily:FONT,fontWeight:400}}/>
             <button onClick={sendMessage} disabled={loading||!input.trim()} style={{
               width:36,height:36,borderRadius:10,border:"none",
               cursor:loading||!input.trim()?"default":"pointer",
               background:input.trim()&&!loading?t.accent:t.border,
               color:input.trim()&&!loading?"#fff":t.textMuted,
-              display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,transition:"all 0.15s",
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0,transition:"all 0.2s",
+              boxShadow:input.trim()&&!loading?"0 2px 8px rgba(236,164,17,0.3)":"none",
             }}>↑</button>
           </div>
         </div>
