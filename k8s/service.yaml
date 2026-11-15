@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: transit-chat
   namespace: transit-chat
+  labels:
+    app.kubernetes.io/part-of: validacion-trafficsoft
 spec:
   selector:
     app: transit-chat
